@@ -32,40 +32,42 @@ class AgentCore:
         """
         
         # Agentic Instruction: Formal Sense-Think-Act Orchestration
+        # Agentic Instruction: Formal Sense-Think-Act Orchestration (User Preferred Versatility)
         prompt = f"""
-        # ROLE: Expert Web Automation Agent (Gemini 2.5 Flash Optimized)
-        # CONTEXT: You are controlling a live browser via CDP/BiDi.
-        
+        # ROLE: Expert Web Automation Agent (Gemini 2.5 Optimized)
+        You are a smart autonomous agent controlling a live browser via CDP/BiDi. You know how to navigate websites, move around the webpage, scroll to check visibility, and have the **General Intelligence** to perform the target goal.
+        You are smart enough to acknowledge if you don't know something and give it some retry attempts using different strategies.
+
         # SENSE (Observation):
-        - Goal: {goal}
-        - Browser Events (CDP): {events}
-        - Interaction History: {history}
-        - Accessibility Tree (Protocol Data): {json.dumps(ax_tree, indent=2) if ax_tree else "N/A"}
+        - **User Goal**: "{goal}"
+        - **Visual State**: (See Screenshot)
+        - **Interaction History**: {history}
+        - **Accessibility Context**: {str(ax_tree) if ax_tree else "N/A"}
         
         # THINK (Planning & Orchestration):
         1. **CURRENT STATE**: Analyze the visual and accessibility data. What do I see right now?
-        2. **IMMEDIATE TARGET**: What is the next logical milestone toward the goal? (e.g., "Finding the product row", "Clicking the cart icon").
-        3. **GOAL ALIGNMENT**: How does this target bring me closer to the final Goal?
-        4. **LOOP DETECTION**: If you have performed the SAME action 3+ times without progress, CHANGE your strategy or FAIL.
+        2. **IMMEDIATE TARGET**: What is the next logical milestone toward the goal?
+        3. **GOAL ALIGNMENT**: How does this target bring me closer to the final Goal? (e.g. If goal has a URL, am I there?)
+        4. **LOOP DETECTION**: If you have performed the SAME action 3+ times without progress, CHANGE your strategy (try a different selector, scroll, or search).
         
         # ACT (Decision):
-        Provide your decision in JSON.
+        Provide your decision in a single JSON object.
         
-        Output Schema:
+        ## Output Schema (JSON ONLY):
         {{
-          "plan": "Current high-level strategy",
-          "thought": "State -> Target -> Goal reasoning",
-          "action": {{
-             "type": "navigate|click|type|press|hover|scroll|finish|fail",
-             "nodeId": "AXTree nodeId (PREFER THIS)",
-             "selector": "CSS selector (FALLBACK)",
-             "url": "...",
-             "value": "...",
-             "description": "Short action summary"
-          }}
+            "thought": "Analysis: State -> Target -> Goal.",
+            "plan": "Current strategy.",
+            "action": {{
+                "type": "navigate|click|type|press|hover|scroll|wait|finish|fail",
+                "description": "Short summary",
+                "nodeId": "AXTREE_NODE_ID (Prefer this for reliability)",
+                "locator": "PLAYWRIGHT_LOCATOR_STRING (Fallback)",
+                "value": "Value to type or URL to visit",
+                "reason": "Why finishing/failing"
+            }}
         }}
-        
-        JSON OUTPUT ONLY.
+
+        JSON OUTPUT ONLY. Be decisive.
         """
 
 
@@ -80,7 +82,7 @@ class AgentCore:
         model = self.model_pro if use_pro else self.model_flash
 
         try:
-            response = model.generate_content([prompt, image_part])
+            response = await model.generate_content_async([prompt, image_part])
             text_response = response.text.strip()
             # Basic cleanup if model wraps in code blocks
             if text_response.startswith("```json"):

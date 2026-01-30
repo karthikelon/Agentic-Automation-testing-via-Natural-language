@@ -6,7 +6,7 @@ function App() {
   const [screenshot, setScreenshot] = useState(null)
   const [isConnected, setIsConnected] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
-  const [stepByStep, setStepByStep] = useState(false)
+  const [reportLink, setReportLink] = useState(null) // New State
   const [isPaused, setIsPaused] = useState(false)
 
   const wsRef = useRef(null)
@@ -35,14 +35,19 @@ function App() {
           data.events.console.forEach(msg => addLog({ type: 'protocol', message: msg }))
           data.events.errors.forEach(err => addLog({ type: 'error', message: err }))
         }
+      } else if (data.type === 'report') {
+        console.log("RX REPORT:", data.url)
+        setReportLink(data.url)
+        addLog({ type: 'success', message: 'Report generated: ' + data.url })
       } else if (data.type === 'pause') {
         setIsPaused(true)
         addLog(data)
       } else {
         addLog(data)
-        if (data.message === 'Goal Achieved!' || data.type === 'error') {
+        if (data.message === 'Goal Achieved!' || data.type === 'error' || data.message === 'Execution Interrupted.') {
           setIsRunning(false)
           setIsPaused(false)
+          // Do NOT reset reportLink here
         }
       }
     }
@@ -68,19 +73,13 @@ function App() {
 
     setIsRunning(true)
     setLogs([]) // Clear previous runs
+    setReportLink(null) // Reset report link
     addLog({ type: 'log', message: 'Starting new test session...' })
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ goal, step_by_step: stepByStep }))
+      wsRef.current.send(JSON.stringify({ goal, step_by_step: false })) // Disabled step_by_step
     } else {
       addLog({ type: 'error', message: 'WebSocket is not connected.' })
-    }
-  }
-
-  const handleNextStep = () => {
-    setIsPaused(false)
-    if (wsRef.current) {
-      wsRef.current.send(JSON.stringify({ type: 'next_step' }))
     }
   }
 
@@ -88,8 +87,7 @@ function App() {
     if (wsRef.current) {
       wsRef.current.send(JSON.stringify({ type: 'stop' }))
     }
-    setIsRunning(false)
-    setIsPaused(false)
+    // Don't set isRunning(false) immediately, let backend confirm interrupt
   }
 
   const handleReset = () => {
@@ -97,6 +95,13 @@ function App() {
     setGoal('')
     setLogs([])
     setScreenshot(null)
+    setReportLink(null)
+  }
+
+  const handleOpenReport = () => {
+    if (reportLink) {
+      window.open(reportLink, '_blank')
+    }
   }
 
   return (
@@ -134,26 +139,22 @@ function App() {
           >
             {isRunning ? (isPaused ? 'Paused' : 'Running...') : 'Run Test'}
           </button>
+
           {isRunning && (
-            <button className="btn-primary" onClick={handleStop} style={{ background: '#ef4444' }}>
+            <button className="btn-primary" onClick={handleStop} style={{ background: '#ef4444', minWidth: '80px', flexShrink: 0 }}>
               Stop
             </button>
           )}
-          {isPaused && (
-            <button className="btn-primary" onClick={handleNextStep} style={{ background: '#0ea5e9' }}>
-              Next Step
-            </button>
-          )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '10px' }}>
-            <input
-              type="checkbox"
-              id="stepMode"
-              checked={stepByStep}
-              onChange={(e) => setStepByStep(e.target.checked)}
-              disabled={isRunning}
-            />
-            <label htmlFor="stepMode" style={{ fontSize: '0.8rem', color: 'var(--text-dim)', cursor: 'pointer' }}>Step-by-Step</label>
-          </div>
+
+          <button
+            className="btn-primary"
+            onClick={handleOpenReport}
+            disabled={!reportLink}
+            style={{ background: reportLink ? '#8b5cf6' : '#475569', opacity: reportLink ? 1 : 0.5, marginLeft: '10px' }}
+          >
+            Open Report
+          </button>
+
         </div>
       </div>
 
@@ -166,7 +167,7 @@ function App() {
           <div className="log-stream" style={{ padding: '15px' }}>
             {logs.length === 0 && <span style={{ color: 'var(--text-dim)', textAlign: 'center', marginTop: '20px' }}>Ready for instructions.</span>}
             {logs.map((log, idx) => (
-              <div className={`log-item ${log.type}`}>
+              <div className={`log-item ${log.type}`} key={idx}>
                 <div className="log-meta">
                   {log.timestamp} • {log.type.toUpperCase()}
                 </div>

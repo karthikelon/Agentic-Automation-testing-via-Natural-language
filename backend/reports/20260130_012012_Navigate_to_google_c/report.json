@@ -1,0 +1,8 @@
+{
+  "session_id": "20260130_012012_Navigate_to_google_c",
+  "start_time": "2026-01-30T01:20:12.922095",
+  "goal": "Navigate to google.com and wait for 10 seconds",
+  "status": "stopped",
+  "steps": [],
+  "end_time": "2026-01-30T01:20:16.211210"
+}

@@ -1,0 +1,20 @@
+{
+  "session_id": "20260129_224132_Test_Goal",
+  "start_time": "2026-01-29T22:41:32.893004",
+  "goal": "Test Goal",
+  "status": "success",
+  "steps": [
+    {
+      "step_index": 1,
+      "timestamp": "2026-01-29T22:41:32.893024",
+      "url": "http://test.com",
+      "screenshot": null,
+      "thought": "Thinking...",
+      "plan": "",
+      "action": {
+        "type": "click"
+      }
+    }
+  ],
+  "end_time": "2026-01-29T22:41:32.893447"
+}

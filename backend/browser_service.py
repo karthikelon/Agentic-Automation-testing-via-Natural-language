@@ -68,118 +68,180 @@ class BrowserService:
         # Let's return the body text for accessibility context.
         return await self.page.evaluate("document.body.innerText")
 
+    async def highlight_element(self, selector: str):
+        """Highlights an element using Playwright locator."""
+        if not self.page or not selector:
+            return
+        try:
+            # Create a locator
+            locator = self.page.locator(selector).first
+            # Scroll into view if needed
+            await locator.scroll_into_view_if_needed()
+            # Apply Red Box
+            await locator.evaluate("""
+                (el) => {
+                    const originalOutline = el.style.outline;
+                    const originalOffset = el.style.outlineOffset;
+                    el.style.outline = '3px solid #ef4444'; // Tailwind Red-500
+                    el.style.outlineOffset = '2px';
+                    // Reset after 1s
+                    setTimeout(() => {
+                        el.style.outline = originalOutline;
+                        el.style.outlineOffset = originalOffset;
+                    }, 1500);
+                }
+            """)
+            # Brief pause for human observer
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            print(f"BrowserService: Highlight failed for {selector}: {e}")
+
     async def execute_action(self, action_type: str, selector: str = None, value: str = None, node_id: str = None):
         """Executes a specific action on the page."""
         if not self.page:
             raise Exception("Browser not started")
 
-        # 1. NEW: CDP-First Interaction (using node_id if provided)
+    async def execute_action(self, action_type: str, selector: str = None, value: str = None, node_id: str = None):
+        """Executes a specific action on the page using Hybrid SOTA Strategy."""
+        if not self.page:
+            raise Exception("Browser not started")
+
+        print(f"BrowserService: Executing {action_type} (NodeID: {node_id}, Selector: {selector})")
+
+        # 1. PRIMARY: CDP/Protocol Interaction (Human-like Physics)
         if node_id and action_type in ["click", "type", "hover"]:
-            print(f"BrowserService: Protocol Interaction for {action_type} on Node {node_id}")
+            print(f"BrowserService: Protocol Interaction (Primary) for {action_type} on Node {node_id}")
             try:
                 # Resolve the AX Node to its backend DOM ID
                 ax_tree = await self.get_accessibility_snapshot()
                 target_node = next((n for n in ax_tree.get("nodes", []) if n.get("nodeId") == node_id), None)
-                
+
                 if target_node and "backendDOMNodeId" in target_node:
                     backend_id = target_node["backendDOMNodeId"]
                     # Use CDP to find coordinates
                     box = await self.cdp_session.send("DOM.getBoxModel", {"backendNodeId": backend_id})
                     if box and "model" in box:
                         quad = box["model"]["content"]
-                        # Quad is [x1, y1, x2, y2, x3, y3, x4, y4]
+                        # Calculate Center
                         x = (quad[0] + quad[2] + quad[4] + quad[6]) / 4
                         y = (quad[1] + quad[3] + quad[5] + quad[7]) / 4
                         
-                        # Use Playwright's mouse/keyboard for better event handling on top of coordinates
+                        # Apply Human-like Physics (Move -> Hover -> Act)
+                        
+                        # 1. Visual Feedback (Red Dot)
+                        await self.page.evaluate(f"""
+                            const dot = document.createElement('div');
+                            dot.style.position = 'absolute';
+                            dot.style.left = '{x}px';
+                            dot.style.top = '{y}px';
+                            dot.style.width = '10px';
+                            dot.style.height = '10px';
+                            dot.style.background = 'red';
+                            dot.style.borderRadius = '50%';
+                            dot.style.zIndex = '99999';
+                            dot.style.pointerEvents = 'none'; // Don't block click
+                            document.body.appendChild(dot);
+                            setTimeout(() => dot.remove(), 1000);
+                        """)
+                        
+                        # 2. Physics: Move Mouse
+                        await self.page.mouse.move(x, y, steps=5) # Steps adds "human" drag latency
+                        await asyncio.sleep(0.1) 
+                        
                         if action_type == "click":
                             await self.page.mouse.click(x, y)
                         elif action_type == "type":
-                            await self.page.mouse.click(x, y) # Focus first
+                            await self.page.mouse.click(x, y)
                             await self.page.keyboard.type(value)
-                        elif action_type == "hover":
-                            await self.page.mouse.move(x, y)
                         
                         await self.page.wait_for_load_state("networkidle", timeout=5000)
-                        return
+                        return # Success!
                     else:
                         print(f"BrowserService: Could not get BoxModel for node {node_id}")
-                else:
-                    print(f"BrowserService: Node {node_id} not found or has no backend ID")
             except Exception as e:
                 print(f"BrowserService: CDP Fallback failed: {e}")
-                # Fall back to selector if provided
+                # Continue to Locator Fallback...
 
-        # 2. Selector-based Fallback (Legacy)
-        if selector:
+        # 2. SECONDARY: Locator-Based Interaction (Fallback)
+        if selector and action_type in ["click", "type", "hover", "scroll"]:
+            print(f"BrowserService: Locator Fallback for {action_type} on {selector}")
             try:
-                await self.page.evaluate(f"""
-                    (sel) => {{
-                        const el = document.querySelector(sel);
-                        if (el) {{
-                            el.style.outline = '4px solid #6d28d9';
-                            el.style.outlineOffset = '2px';
-                            setTimeout(() => {{ el.style.outline = ''; }}, 2000);
-                        }}
-                    }}
-                """, selector)
-                await asyncio.sleep(0.3)
-            except:
-                pass
+                # Highlight first
+                await self.highlight_element(selector)
+                
+                locator = self.page.locator(selector).first
+                
+                if action_type == "click":
+                    await locator.click(timeout=5000)
+                elif action_type == "type":
+                    await locator.fill(value, timeout=5000)
+                elif action_type == "hover":
+                    await locator.hover(timeout=5000)
+                elif action_type == "scroll":
+                    await locator.scroll_into_view_if_needed(timeout=5000)
+                
+                await self.page.wait_for_load_state("networkidle", timeout=5000)
+                return
+            except Exception as e:
+                print(f"BrowserService: Locator action failed ({e}).")
 
+        # 3. Simple Fallbacks
         if action_type == "navigate":
             url = value or selector
-            if not url.startswith("http"):
-                url = f"https://{url}"
-            print(f"BrowserService: Navigating to {url}...")
-            try:
+            if url:
+                if not url.startswith("http"):
+                    url = f"https://{url}"
+                print(f"BrowserService: Navigating to {url}...")
                 await self.page.goto(url, timeout=30000)
                 await self.page.wait_for_load_state("load", timeout=10000)
-            except Exception as e:
-                print(f"BrowserService: Navigation Warning: {e}")
 
-        elif action_type == "click":
-            await self.page.click(selector)
-        elif action_type == "type":
-            await self.page.fill(selector, value)
         elif action_type == "press":
             await self.page.keyboard.press(value)
-        elif action_type == "hover":
-            await self.page.hover(selector)
-        elif action_type == "scroll":
-            if selector:
-                await self.page.locator(selector).scroll_into_view_if_needed()
-            else:
-                await self.page.evaluate("window.scrollBy(0, 500)")
+        elif action_type == "scroll" and not selector:
+             await self.page.evaluate("window.scrollBy(0, 500)")
         
-        await self.page.wait_for_load_state("networkidle", timeout=5000)
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            print("BrowserService: Network didn't idle in 5s (proceeding anyway)")
 
     async def get_accessibility_snapshot(self):
-        """Fetches and simplifies AXTree to minimize tokens and focus on interactive nodes."""
+        """Fetches 'Active' AXTree: Visible & Interactive nodes only (Token Efficient)."""
         if not self.cdp_session:
             return {"nodes": []}
         
         try:
+            # 1. Fetch Full Tree
             raw_tree = await self.cdp_session.send("Accessibility.getFullAXTree")
             nodes = raw_tree.get("nodes", [])
             
-            # Simple heuristic: only keep nodes with names OR roles like 'button', 'link', 'textbox'
-            # To save tokens while keeping the "Protocol" advantage.
+            # 2. Heuristic Filter (Active Accessibility)
             simplified = []
-            interactive_roles = ["button", "link", "textbox", "checkbox", "combobox", "listbox", "searchbox", "menuitem"]
+            interactive_roles = ["button", "link", "textbox", "checkbox", "combobox", "listbox", "searchbox", "menuitem", "menu", "tab"]
             
             for n in nodes:
-                # We want nodes that have a name or are in interactive roles
                 role = n.get("role", {}).get("value")
-                name = n.get("name", {}).get("value")
-                if (role in interactive_roles) or (name and len(name) > 1):
+                name = n.get("name", {}).get("value") or ""
+                
+                # SOTA Filter: Must have a Role AND (be interactive OR have a Name)
+                # This removes structural <div> soup that has no semantic meaning.
+                is_interactive = role in interactive_roles
+                has_content = len(name) > 0
+                
+                if (is_interactive) or (role == "statictext" and len(name) > 3) or (role == "image" and has_content):
+                    # Exclude obviously ignored nodes if property exists (CDP specific)
+                    if n.get("ignored"): 
+                        continue
+
                     simplified.append({
                         "nodeId": n.get("nodeId"),
                         "role": role,
-                        "name": name,
+                        "name": name[:100], # Trucate long text
                         "backendDOMNodeId": n.get("backendDOMNodeId")
                     })
-            return {"nodes": simplified}
+            
+            # Limit to top 200 nodes to prevent context window explosion
+            return {"nodes": simplified[:200]}
         except Exception as e:
             print(f"Error fetching/simplifying AXTree: {e}")
             return {"nodes": []}
